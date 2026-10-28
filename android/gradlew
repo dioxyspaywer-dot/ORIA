@@ -1,0 +1,4 @@
+#!/usr/bin/env sh
+# Fallback simple pour les runners GitHub disposant de Gradle.
+# Pour une compilation reproductible, générer un wrapper Gradle standard.
+exec gradle "$@"
