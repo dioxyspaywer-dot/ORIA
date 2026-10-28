@@ -1,9 +1,0 @@
-{
-  "name": "oria-signaling",
-  "version": "0.1.0",
-  "private": true,
-  "description": "Prototype de signalisation WebSocket pour ORIA",
-  "main": "server.js",
-  "scripts": { "start": "node server.js" },
-  "dependencies": { "express": "^4.21.2", "ws": "^8.18.0" }
-}
