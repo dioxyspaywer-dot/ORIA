@@ -10,7 +10,14 @@ const String SERVER_URL = 'https://oria-server-tzc1.onrender.com';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  await [Permission.camera, Permission.microphone, Permission.location, Permission.notification].request();
+  // ✅ Toutes les permissions nécessaires
+  await [
+    Permission.camera,
+    Permission.microphone,
+    Permission.location,
+    Permission.notification,
+    Permission.storage,
+  ].request();
   await initializeService();
   runApp(const OriaChildApp());
 }
@@ -59,20 +66,25 @@ void onStart(ServiceInstance instance) async {
 
     socket!.on('execute_command', (action) async {
       print('📡 Commande: $action');
-      if (action == 'start_camera') {
-        streamService?.stop();
-        streamService = StreamService(socket!, 'parent');
-        await streamService!.startCamera();
-      } else if (action == 'start_mic') {
-        streamService?.stop();
-        streamService = StreamService(socket!, 'parent');
-        await streamService!.startMic();
-      } else if (action == 'start_screen') {
-        streamService?.stop();
-        streamService = StreamService(socket!, 'parent');
-        await streamService!.startScreen();
-      } else if (action == 'stop_stream') {
-        streamService?.stop();
+      try {
+        if (action == 'start_camera') {
+          await streamService?.stop();
+          streamService = StreamService(socket!, 'parent');
+          await streamService!.startCamera();
+        } else if (action == 'start_mic') {
+          await streamService?.stop();
+          streamService = StreamService(socket!, 'parent');
+          await streamService!.startMic();
+        } else if (action == 'start_screen') {
+          await streamService?.stop();
+          streamService = StreamService(socket!, 'parent');
+          await streamService!.startScreen();
+        } else if (action == 'stop_stream') {
+          await streamService?.stop();
+          streamService = null;
+        }
+      } catch (e) {
+        print('❌ Erreur commande: $e');
       }
     });
 
