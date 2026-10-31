@@ -1,5 +1,6 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 class StreamService {
   RTCPeerConnection? _peerConnection;
@@ -10,47 +11,49 @@ class StreamService {
   StreamService(this.socket, this.targetId);
 
   Future<void> startCamera() async {
+    await WakelockPlus.enable();
     print('📷 Démarrage caméra...');
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': {'facingMode': 'user', 'width': 640, 'height': 480, 'frameRate': 30}
     });
-    print('📷 Stream créé: ${_localStream!.getTracks().length} tracks');
+    print('📷 Tracks: ${_localStream!.getTracks().length}');
     await _createPeerConnection();
     await _sendOffer();
   }
 
   Future<void> startMic() async {
+    await WakelockPlus.enable();
     print('🎤 Démarrage micro...');
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
       'video': false
     });
-    print('🎤 Stream créé: ${_localStream!.getTracks().length} tracks');
+    print('🎤 Tracks: ${_localStream!.getTracks().length}');
     await _createPeerConnection();
     await _sendOffer();
   }
 
   Future<void> startScreen() async {
+    await WakelockPlus.enable();
     print('📱 Démarrage capture écran...');
     try {
-      // getDisplayMedia demande automatiquement la permission MediaProjection
       _localStream = await navigator.mediaDevices.getDisplayMedia({
         'video': {'width': 1280, 'height': 720, 'frameRate': 30},
         'audio': true
       });
-      print('📱 Stream écran créé: ${_localStream!.getTracks().length} tracks');
+      print('📱 Tracks écran: ${_localStream!.getTracks().length}');
       await _createPeerConnection();
       await _sendOffer();
     } catch (e) {
-      print('❌ Erreur capture écran: $e');
-      // Fallback: essayer sans audio si ça échoue
+      print('❌ Erreur écran: $e');
       try {
         _localStream = await navigator.mediaDevices.getDisplayMedia({'video': true});
         await _createPeerConnection();
         await _sendOffer();
       } catch (e2) {
-        print('❌ Erreur fallback écran: $e2');
+        print('❌ Fallback échoué: $e2');
+        await WakelockPlus.disable();
       }
     }
   }
@@ -63,9 +66,8 @@ class StreamService {
       ]
     });
 
-    // ✅ Ajouter TOUS les tracks (audio + vidéo)
     _localStream!.getTracks().forEach((track) {
-      print('➕ Ajout track: ${track.kind}');
+      print('➕ Track ajouté: ${track.kind}');
       _peerConnection!.addTrack(track, _localStream!);
     });
 
@@ -79,7 +81,7 @@ class StreamService {
     };
 
     _peerConnection!.onConnectionState = (state) {
-      print('🔗 État connexion: $state');
+      print('🔗 Connexion: $state');
     };
   }
 
@@ -115,7 +117,8 @@ class StreamService {
   }
 
   Future<void> stop() async {
-    print('🛑 Arrêt stream...');
+    print('🛑 Arrêt stream + WakeLock...');
+    await WakelockPlus.disable();
     _localStream?.getTracks().forEach((t) => t.stop());
     await _localStream?.dispose();
     await _peerConnection?.close();
