@@ -29,15 +29,10 @@ jobs:
           cd oria_child
           flutter pub get
 
-      - name: Verify Android config
-        run: |
-          cd oria_child
-          flutter doctor -v
-
       - name: Build APK
         run: |
           cd oria_child
-          flutter build apk --debug
+          flutter build apk --debug --no-shrink
 
       - name: Upload Child APK
         uses: actions/upload-artifact@v4
@@ -68,15 +63,10 @@ jobs:
           cd oria_parent
           flutter pub get
 
-      - name: Verify Android config
-        run: |
-          cd oria_parent
-          flutter doctor -v
-
       - name: Build APK
         run: |
           cd oria_parent
-          flutter build apk --debug
+          flutter build apk --debug --no-shrink
 
       - name: Upload Parent APK
         uses: actions/upload-artifact@v4
