@@ -2,39 +2,31 @@ import 'package:flutter/material.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:google_fonts/google_fonts.dart';
 
-// ⚠️ REMPLACE PAR TON URL RENDER RÉELLE
-const String SERVER_URL = 'https://ton-url-render.onrender.com';
+const String SERVER_URL = 'https://oria-server-tzc1.onrender.com';
 
 void main() => runApp(const OriaParentApp());
 
 class OriaParentApp extends StatelessWidget {
   const OriaParentApp({super.key});
-
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        useMaterial3: true,
-        colorSchemeSeed: Colors.indigo,
-        textTheme: GoogleFonts.poppinsTextTheme(),
-        brightness: Brightness.dark,
-      ),
-      home: const ParentHome(),
+      theme: ThemeData(useMaterial3: true, colorSchemeSeed: Colors.indigo, textTheme: GoogleFonts.poppinsTextTheme(), brightness: Brightness.dark),
+      home: const DeviceListScreen(),
     );
   }
 }
 
-class ParentHome extends StatefulWidget {
-  const ParentHome({super.key});
-  @override State<ParentHome> createState() => _ParentHomeState();
+class DeviceListScreen extends StatefulWidget {
+  const DeviceListScreen({super.key});
+  @override State<DeviceListScreen> createState() => _DeviceListScreenState();
 }
 
-class _ParentHomeState extends State<ParentHome> {
+class _DeviceListScreenState extends State<DeviceListScreen> {
   late IO.Socket socket;
   List<Map<String, dynamic>> devices = [];
-  int currentIndex = 0;
-  Map<String, dynamic>? selectedDevice;
+  bool connected = false;
 
   @override
   void initState() {
@@ -42,190 +34,84 @@ class _ParentHomeState extends State<ParentHome> {
     socket = IO.io(SERVER_URL, <String, dynamic>{
       'transports': ['websocket'],
       'autoConnect': true,
+      'reconnection': true,
+      'reconnectionDelay': 5000,
     });
-
-    socket.on('connect', (_) {
-      debugPrint('✅ Connecté au serveur ORIA');
-      socket.emit('get_devices');
-    });
-
-    socket.on('device_list', (data) {
-      setState(() => devices = List<Map<String, dynamic>>.from(data));
-    });
-
+    socket.on('connect', (_) { setState(() => connected = true); socket.emit('get_devices'); });
+    socket.on('disconnect', (_) => setState(() => connected = false));
+    socket.on('device_list', (data) => setState(() => devices = List<Map<String, dynamic>>.from(data)));
     socket.on('device_list_updated', (_) => socket.emit('get_devices'));
   }
 
-  void sendCommand(String action) {
-    if (selectedDevice == null) return;
-    socket.emit('command', {
-      'targetId': selectedDevice!['deviceId'],
-      'action': action,
-    });
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Commande "$action" envoyée'), duration: const Duration(seconds: 1)),
+  Future<void> _rename(String id, String name) async {
+    final c = TextEditingController(text: name);
+    await showDialog(context: context, builder: (ctx) => AlertDialog(
+      title: const Text('Renommer'),
+      content: TextField(controller: c, decoration: const InputDecoration(labelText: 'Nom personnalisé')),
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Annuler')),
+        FilledButton(onPressed: () { if (c.text.isNotEmpty) { socket.emit('rename_device', {'deviceId': id, 'newName': c.text}); Navigator.pop(ctx); } }, child: const Text('OK')),
+      ],
+    ));
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(title: Row(children: [const Text('Appareils'), const Spacer(), Icon(connected ? Icons.cloud_done : Icons.cloud_off, size: 20)])),
+      body: !connected
+          ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 16), Text('Connexion au serveur...\n(Réveil en cours ~30s)', textAlign: TextAlign.center)]))
+          : devices.isEmpty
+              ? const Center(child: Text('Aucun appareil.\nInstallez "oria" sur un téléphone.'))
+              : RefreshIndicator(onRefresh: () async => socket.emit('get_devices'), child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: devices.length, itemBuilder: (_, i) {
+                  final d = devices[i];
+                  final online = d['status'] == 'online';
+                  return Card(margin: const EdgeInsets.only(bottom: 12), child: ListTile(
+                    leading: CircleAvatar(backgroundColor: online ? Colors.green : Colors.grey, child: Icon(online ? Icons.check : Icons.close, color: Colors.white)),
+                    title: Text(d['customName'] ?? d['deviceName'] ?? 'Inconnu'),
+                    subtitle: Text(online ? 'En ligne' : 'Hors ligne'),
+                    trailing: const Icon(Icons.chevron_right),
+                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DashboardScreen(device: d, socket: socket))),
+                    onLongPress: () => _rename(d['_id'], d['customName'] ?? d['deviceName']),
+                  ));
+                })),
     );
+  }
+
+  @override void dispose() { socket.disconnect(); super.dispose(); }
+}
+
+class DashboardScreen extends StatefulWidget {
+  final Map<String, dynamic> device;
+  final IO.Socket socket;
+  const DashboardScreen({super.key, required this.device, required this.socket});
+  @override State<DashboardScreen> createState() => _DashboardScreenState();
+}
+
+class _DashboardScreenState extends State<DashboardScreen> {
+  int idx = 0;
+  void cmd(String a) {
+    widget.socket.emit('command', {'targetId': widget.device['deviceId'], 'action': a});
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Demande "$a" envoyée...')));
   }
 
   @override
   Widget build(BuildContext context) {
     final pages = [
-      DevicesPage(devices: devices, onSelect: (d) => setState(() => selectedDevice = d)),
-      CameraControlPage(onCapture: () => sendCommand('capture_photo')),
-      MicControlPage(onListen: () => sendCommand('start_mic')),
-      ScreenControlPage(onCapture: () => sendCommand('capture_screen')),
+      Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.devices, size: 80, color: Colors.indigo), const SizedBox(height: 20), Text(widget.device['customName'] ?? widget.device['deviceName'], style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text(widget.device['status'] == 'online' ? '🟢 En ligne' : '⚪ Hors ligne')])),
+      Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Container(width: double.infinity, height: 300, color: Colors.black87, child: const Center(child: Text('Flux vidéo\n(Appuyer ci-dessous)', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)))), const SizedBox(height: 24), FilledButton.icon(onPressed: () => cmd('start_camera'), icon: const Icon(Icons.play_arrow), label: const Text('DEMANDER CAMÉRA'), style: FilledButton.styleFrom(minimumSize: const Size(250, 50)))])),
+      Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [const Icon(Icons.graphic_eq, size: 100, color: Colors.indigo), const SizedBox(height: 24), FilledButton.icon(onPressed: () => cmd('start_mic'), icon: const Icon(Icons.play_arrow), label: const Text('DEMANDER MICRO'), style: FilledButton.styleFrom(minimumSize: const Size(250, 50)))])),
+      Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Container(width: double.infinity, height: 400, color: Colors.black87, child: const Center(child: Text('Flux écran\n(Appuyer ci-dessous)', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54)))), const SizedBox(height: 24), FilledButton.icon(onPressed: () => cmd('start_screen'), icon: const Icon(Icons.play_arrow), label: const Text('DEMANDER ÉCRAN'), style: FilledButton.styleFrom(minimumSize: const Size(250, 50)))])),
     ];
-
     return Scaffold(
-      body: pages[currentIndex],
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: currentIndex,
-        onDestinationSelected: (i) => setState(() => currentIndex = i),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.devices), label: 'Appareils'),
-          NavigationDestination(icon: Icon(Icons.videocam), label: 'Caméra'),
-          NavigationDestination(icon: Icon(Icons.mic), label: 'Micro'),
-          NavigationDestination(icon: Icon(Icons.phone_android), label: 'Écran'),
-        ],
-      ),
-    );
-  }
-
-  @override
-  void dispose() {
-    socket.disconnect();
-    super.dispose();
-  }
-}
-
-// --- ÉCRAN APPAREILS ---
-class DevicesPage extends StatelessWidget {
-  final List<Map<String, dynamic>> devices;
-  final Function(Map<String, dynamic>) onSelect;
-
-  const DevicesPage({super.key, required this.devices, required this.onSelect});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Mes Enfants')),
-      body: devices.isEmpty
-          ? const Center(child: Text('Aucun appareil connecté.\nInstallez "oria" sur le téléphone de l\'enfant.'))
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: devices.length,
-              itemBuilder: (_, i) {
-                final d = devices[i];
-                final isOnline = d['status'] == 'online';
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 12),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: isOnline ? Colors.green : Colors.grey,
-                      child: Icon(isOnline ? Icons.check : Icons.close, color: Colors.white),
-                    ),
-                    title: Text(d['deviceName'] ?? 'Inconnu'),
-                    subtitle: Text(isOnline ? 'En ligne' : 'Hors ligne'),
-                    trailing: const Icon(Icons.chevron_right),
-                    onTap: () => onSelect(d),
-                  ),
-                );
-              },
-            ),
-    );
-  }
-}
-
-// --- ÉCRAN CAMÉRA ---
-class CameraControlPage extends StatelessWidget {
-  final VoidCallback onCapture;
-  const CameraControlPage({super.key, required this.onCapture});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Caméra Directe')),
-      body: Column(
-        children: [
-          Expanded(
-            child: Container(
-              color: Colors.black87,
-              child: const Center(child: Text('Flux vidéo en direct\n(WebRTC)', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton.icon(
-              onPressed: onCapture,
-              icon: const Icon(Icons.camera_alt),
-              label: const Text('Prendre Photo'),
-              style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// --- ÉCRAN MICRO ---
-class MicControlPage extends StatelessWidget {
-  final VoidCallback onListen;
-  const MicControlPage({super.key, required this.onListen});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Écoute Directe')),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            const Icon(Icons.graphic_eq, size: 100, color: Colors.indigo),
-            const SizedBox(height: 20),
-            const Text('Appuyez pour écouter en direct', style: TextStyle(fontSize: 16)),
-            const SizedBox(height: 30),
-            FilledButton.icon(
-              onPressed: onListen,
-              icon: const Icon(Icons.mic),
-              label: const Text('Commencer l\'écoute'),
-              style: FilledButton.styleFrom(minimumSize: const Size(200, 50)),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// --- ÉCRAN ÉCRAN ---
-class ScreenControlPage extends StatelessWidget {
-  final VoidCallback onCapture;
-  const ScreenControlPage({super.key, required this.onCapture});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(title: const Text('Écran en Direct')),
-      body: Column(
-        children: [
-          Expanded(
-            child: Container(
-              color: Colors.black87,
-              child: const Center(child: Text('Flux écran en direct\n(WebRTC)', textAlign: TextAlign.center, style: TextStyle(color: Colors.white54))),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: FilledButton.icon(
-              onPressed: onCapture,
-              icon: const Icon(Icons.screenshot),
-              label: const Text('Capture d\'Écran'),
-              style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
-            ),
-          ),
-        ],
-      ),
+      appBar: AppBar(title: Text(widget.device['customName'] ?? widget.device['deviceName'])),
+      body: pages[idx],
+      bottomNavigationBar: NavigationBar(selectedIndex: idx, onDestinationSelected: (i) => setState(() => idx = i), destinations: const [
+        NavigationDestination(icon: Icon(Icons.info), label: 'Infos'),
+        NavigationDestination(icon: Icon(Icons.videocam), label: 'Caméra'),
+        NavigationDestination(icon: Icon(Icons.mic), label: 'Micro'),
+        NavigationDestination(icon: Icon(Icons.phone_android), label: 'Écran'),
+      ]),
     );
   }
 }
