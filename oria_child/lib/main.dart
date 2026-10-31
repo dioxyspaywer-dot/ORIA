@@ -27,18 +27,23 @@ Future<void> initializeService() async {
   final service = FlutterBackgroundService();
   await service.configure(
     androidConfiguration: AndroidConfiguration(
-      onStartCommand: onStartCommand,
+      // ✅ CORRECTION : onCreate au lieu de onStartCommand (API v5.x)
+      onCreate: onStart,
       autoStart: true,
       isForegroundMode: true,
       foregroundServiceNotificationId: 888,
     ),
-    iosConfiguration: IosConfiguration(autoStart: true),
+    iosConfiguration: IosConfiguration(
+      autoStart: true,
+      onForeground: onStart,
+    ),
   );
   await service.startService();
 }
 
+// ✅ CORRECTION : @pragma obligatoire + signature ServiceInstance
 @pragma('vm:entry-point')
-void onStartCommand(ServiceInstance instance) async {
+void onStart(ServiceInstance instance) async {
   DartPluginRegistrant.ensureInitialized();
 
   final deviceInfo = DeviceInfoPlugin();
@@ -57,19 +62,28 @@ void onStartCommand(ServiceInstance instance) async {
     print('✅ Connecté au serveur ORIA');
     socket.emit('register_child', {
       'deviceId': deviceId,
-      'deviceName': deviceName
+      'deviceName': deviceName,
     });
   });
 
   socket.on('execute_command', (action) {
     print('📡 Commande reçue: $action');
     // Ici, on activerait le flux caméra/micro/écran via WebRTC
-    // Pour la V1, on loggue juste la commande
   });
 
   socket.on('disconnect', (_) {
     print('❌ Déconnecté du serveur');
   });
+
+  // Garder le service en vie
+  if (instance is AndroidServiceInstance) {
+    instance.on('setAsForeground').listen((event) {
+      instance.setAsForegroundService();
+    });
+    instance.on('setAsBackground').listen((event) {
+      instance.setAsBackgroundService();
+    });
+  }
 }
 
 class OriaChildApp extends StatelessWidget {
@@ -87,11 +101,14 @@ class OriaChildApp extends StatelessWidget {
             children: [
               Icon(Icons.visibility_off, color: Colors.grey[800], size: 100),
               const SizedBox(height: 20),
-              Text("ORIA Activé", style: TextStyle(color: Colors.grey[700], fontSize: 18)),
+              Text("ORIA Activé",
+                  style: TextStyle(color: Colors.grey[700], fontSize: 18)),
               const SizedBox(height: 10),
-              Text("Service en arrière-plan actif.", style: TextStyle(color: Colors.grey[800], fontSize: 12)),
+              Text("Service en arrière-plan actif.",
+                  style: TextStyle(color: Colors.grey[800], fontSize: 12)),
               const SizedBox(height: 30),
-              Text("Vous pouvez fermer cette fenêtre.", style: TextStyle(color: Colors.grey[900], fontSize: 10)),
+              Text("Vous pouvez fermer cette fenêtre.",
+                  style: TextStyle(color: Colors.grey[900], fontSize: 10)),
             ],
           ),
         ),
