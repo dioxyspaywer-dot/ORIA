@@ -177,13 +177,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ]
     });
 
-    // ✅ Réception des tracks (vidéo + audio)
+    // ✅ Réception des tracks (vidéo + audio) - mirror supprimé pour compatibilité v0.10.8
     _pc!.onTrack = (event) {
       print('📥 Track reçu: ${event.track.kind}');
       if (event.streams.isNotEmpty) {
         _renderer!.srcObject = event.streams[0];
         _renderer!.muted = false;
-        _renderer!.mirror = false;
       }
     };
 
