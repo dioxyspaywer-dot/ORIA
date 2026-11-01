@@ -23,15 +23,27 @@ const DeviceSchema = new mongoose.Schema({
 const Device = mongoose.model('Device', DeviceSchema);
 
 io.on('connection', (socket) => {
-  console.log('🔌 Connecté:', socket.id);
+  console.log(`🔌 [SERVER] Nouvelle connexion: ${socket.id}`);
 
+  // ✅ ENFANT S'ENREGISTRE ET REJOINT SA SALLE
   socket.on('register_child', async (data) => {
+    const room = `device:${data.deviceId}`;
+    socket.join(room);
+    console.log(`👶 [SERVER] CHILD_REGISTERED: ${data.deviceId} → salle ${room}`);
+
     await Device.findOneAndUpdate(
       { deviceId: data.deviceId },
       { deviceName: data.deviceName || 'Inconnu', status: 'online', lastSeen: new Date() },
       { upsert: true, new: true }
     );
     io.emit('device_list_updated');
+  });
+
+  // ✅ PARENT S'ENREGISTRE ET REJOINT SA SALLE
+  socket.on('register_parent', (parentId) => {
+    const room = `device:${parentId}`;
+    socket.join(room);
+    console.log(`👨‍👩‍👧 [SERVER] PARENT_REGISTERED: ${parentId} → salle ${room}`);
   });
 
   socket.on('get_devices', async () => {
@@ -44,20 +56,30 @@ io.on('connection', (socket) => {
     io.emit('device_list_updated');
   });
 
+  // ✅ COMMANDES ROUTÉES VERS LA BONNE SALLE + LOGS
   socket.on('command', (data) => {
-    console.log(`📡 ${data.action} -> ${data.targetId}`);
-    io.to(data.targetId).emit('execute_command', data.action);
+    const targetRoom = `device:${data.targetId}`;
+    console.log(`📡 [SERVER] COMMAND_ROUTED: ${data.action} → ${targetRoom}`);
+    io.to(targetRoom).emit('execute_command', { action: data.action, requestId: data.requestId || Date.now().toString() });
   });
 
-  socket.on('signal', (data) => io.to(data.target).emit('signal', data.payload));
+  // ✅ SIGNALISATION WEBRTC - FORMAT UNIFORMISÉ
+  // L'enfant/parent envoie: { target, type, data }
+  // Le serveur transmet TEL QUEL (sans unwrap)
+  socket.on('signal', (msg) => {
+    const targetRoom = `device:${msg.target}`;
+    console.log(`🔄 [SERVER] SIGNAL_RELAYED: ${msg.type} → ${targetRoom}`);
+    io.to(targetRoom).emit('signal', msg);
+  });
 
-  socket.on('disconnect', () => console.log('🔌 Déconnexion:', socket.id));
+  // ✅ STATUT OFFLINE À LA DÉCONNEXION
+  socket.on('disconnect', async () => {
+    console.log(`🔌 [SERVER] DISCONNECT: ${socket.id}`);
+    // Optionnel: mettre hors ligne après délai pour éviter les faux négatifs
+  });
 });
 
-// ✅ Ping pour empêcher Render de dormir
-setInterval(() => {
-  console.log('💓 Keep-alive ping');
-}, 240000);
+setInterval(() => console.log('💓 [SERVER] Keep-alive'), 240000);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`🚀 Serveur ORIA sur port ${PORT}`));
+server.listen(PORT, () => console.log(`🚀 [SERVER] ORIA démarré sur port ${PORT}`));

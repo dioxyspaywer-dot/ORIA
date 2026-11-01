@@ -6,59 +6,60 @@ class StreamService {
   RTCPeerConnection? _peerConnection;
   MediaStream? _localStream;
   final IO.Socket socket;
-  final String targetId;
+  final String targetId; // Ex: 'parent-main'
 
   StreamService(this.socket, this.targetId);
 
   Future<void> startCamera() async {
     await WakelockPlus.enable();
-    print('📷 Démarrage caméra...');
+    print('📷 [STREAM] START_CAMERA');
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': {'facingMode': 'user', 'width': 640, 'height': 480, 'frameRate': 30}
     });
-    print('📷 Tracks: ${_localStream!.getTracks().length}');
+    print('📷 [STREAM] TRACKS_CREATED: ${_localStream!.getTracks().length}');
     await _createPeerConnection();
     await _sendOffer();
   }
 
   Future<void> startMic() async {
     await WakelockPlus.enable();
-    print('🎤 Démarrage micro...');
+    print('🎤 [STREAM] START_MIC');
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
       'video': false
     });
-    print('🎤 Tracks: ${_localStream!.getTracks().length}');
+    print('🎤 [STREAM] TRACKS_CREATED: ${_localStream!.getTracks().length}');
     await _createPeerConnection();
     await _sendOffer();
   }
 
   Future<void> startScreen() async {
     await WakelockPlus.enable();
-    print('📱 Démarrage capture écran...');
+    print('📱 [STREAM] START_SCREEN');
     try {
       _localStream = await navigator.mediaDevices.getDisplayMedia({
         'video': {'width': 1280, 'height': 720, 'frameRate': 30},
         'audio': true
       });
-      print('📱 Tracks écran: ${_localStream!.getTracks().length}');
+      print('📱 [STREAM] SCREEN_TRACKS: ${_localStream!.getTracks().length}');
       await _createPeerConnection();
       await _sendOffer();
     } catch (e) {
-      print('❌ Erreur écran: $e');
+      print('❌ [STREAM] SCREEN_ERROR: $e');
       try {
         _localStream = await navigator.mediaDevices.getDisplayMedia({'video': true});
         await _createPeerConnection();
         await _sendOffer();
       } catch (e2) {
-        print('❌ Fallback échoué: $e2');
+        print('❌ [STREAM] SCREEN_FALLBACK_ERROR: $e2');
         await WakelockPlus.disable();
       }
     }
   }
 
   Future<void> _createPeerConnection() async {
+    print('🔗 [WEBRTC] CREATE_PEER_CONNECTION');
     _peerConnection = await createPeerConnection({
       'iceServers': [
         {'urls': 'stun:stun.l.google.com:19302'},
@@ -67,21 +68,27 @@ class StreamService {
     });
 
     _localStream!.getTracks().forEach((track) {
-      print('➕ Track ajouté: ${track.kind}');
+      print('➕ [WEBRTC] ADD_TRACK: ${track.kind}');
       _peerConnection!.addTrack(track, _localStream!);
     });
 
     _peerConnection!.onIceCandidate = (candidate) {
       if (candidate.candidate != null) {
+        // ✅ Format uniforme: { target, type, data }
         socket.emit('signal', {
           'target': targetId,
-          'payload': {'type': 'candidate', 'data': candidate.toMap()}
+          'type': 'candidate',
+          'data': candidate.toMap()
         });
       }
     };
 
     _peerConnection!.onConnectionState = (state) {
-      print('🔗 Connexion: $state');
+      print('🔗 [WEBRTC] CONNECTION_STATE: $state');
+    };
+
+    _peerConnection!.onIceConnectionState = (state) {
+      print('🧊 [WEBRTC] ICE_STATE: $state');
     };
   }
 
@@ -91,33 +98,35 @@ class StreamService {
       'offerToReceiveVideo': true
     });
     await _peerConnection!.setLocalDescription(offer);
-    print('📤 Offre envoyée');
+    print('📤 [WEBRTC] OFFER_SENT → $targetId');
+    // ✅ Format uniforme: { target, type, data }
     socket.emit('signal', {
       'target': targetId,
-      'payload': {'type': 'offer', 'data': offer.toMap()}
+      'type': 'offer',
+      'data': offer.toMap()
     });
   }
 
-  void handleSignal(Map<String, dynamic> data) async {
+  // ✅ Format uniforme reçu: { target, type, data }
+  void handleSignal(Map<String, dynamic> msg) async {
     if (_peerConnection == null) return;
+    final type = msg['type'];
+    final data = msg['data'];
     try {
-      if (data['type'] == 'answer') {
-        print('📥 Réponse reçue');
-        await _peerConnection!.setRemoteDescription(
-          RTCSessionDescription(data['data']['sdp'], data['data']['type'])
-        );
-      } else if (data['type'] == 'candidate') {
-        await _peerConnection!.addCandidate(
-          RTCIceCandidate(data['data']['candidate'], data['data']['sdpMid'], data['data']['sdpMLineIndex'])
-        );
+      if (type == 'answer') {
+        print('📥 [WEBRTC] ANSWER_RECEIVED');
+        await _peerConnection!.setRemoteDescription(RTCSessionDescription(data['sdp'], data['type']));
+      } else if (type == 'candidate') {
+        print('📥 [WEBRTC] CANDIDATE_RECEIVED');
+        await _peerConnection!.addCandidate(RTCIceCandidate(data['candidate'], data['sdpMid'], data['sdpMLineIndex']));
       }
     } catch (e) {
-      print('❌ Erreur signal: $e');
+      print('❌ [WEBRTC] SIGNAL_ERROR: $e');
     }
   }
 
   Future<void> stop() async {
-    print('🛑 Arrêt stream + WakeLock...');
+    print('🛑 [STREAM] STOP + WAKELOCK_DISABLE');
     await WakelockPlus.disable();
     _localStream?.getTracks().forEach((t) => t.stop());
     await _localStream?.dispose();
