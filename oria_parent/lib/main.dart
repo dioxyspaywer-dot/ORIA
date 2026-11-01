@@ -20,6 +20,7 @@ class OriaParentApp extends StatelessWidget {
   }
 }
 
+// --- ÉCRAN 1 : LISTE DES APPAREILS ---
 class DeviceListScreen extends StatefulWidget {
   const DeviceListScreen({super.key});
   @override State<DeviceListScreen> createState() => _DeviceListScreenState();
@@ -36,7 +37,6 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
     socket = IO.io(SERVER_URL, <String, dynamic>{'transports': ['websocket'], 'autoConnect': true, 'reconnection': true, 'reconnectionDelay': 5000});
     socket.on('connect', (_) {
       setState(() => connected = true);
-      // ✅ Parent s'enregistre et rejoint sa salle
       socket.emit('register_parent', PARENT_ID);
       socket.emit('get_devices');
       print('✅ [PARENT] CONNECTED + REGISTERED');
@@ -76,6 +76,7 @@ class _DeviceListScreenState extends State<DeviceListScreen> {
   @override void dispose() { socket.disconnect(); super.dispose(); }
 }
 
+// --- ÉCRAN 2 : DASHBOARD ---
 class DashboardScreen extends StatefulWidget {
   final Map<String, dynamic> device;
   final IO.Socket socket;
@@ -88,14 +89,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
   RTCVideoRenderer? _renderer;
   RTCPeerConnection? _pc;
   bool streaming = false;
-  // ✅ Référence pour nettoyer l'écouteur signal
-  Function? _signalListener;
+  // ✅ CORRECTION: Type explicite pour socket.on/off
+  dynamic Function(dynamic)? _signalListener;
 
   @override void initState() { super.initState(); _initRenderer(); }
   Future<void> _initRenderer() async { _renderer = RTCVideoRenderer(); await _renderer!.initialize(); }
 
   Future<void> _startStream(String type) async {
-    // ✅ Nettoyer toute session précédente
     _cleanupSession();
 
     final requestId = DateTime.now().millisecondsSinceEpoch.toString();
@@ -124,9 +124,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     _pc!.onConnectionState = (state) => print('🔗 [PARENT] CONNECTION_STATE: $state');
     _pc!.onIceConnectionState = (state) => print('🧊 [PARENT] ICE_STATE: $state');
 
-    // ✅ Écouteur avec référence pour nettoyage + format uniforme
-    _signalListener = (msg) async {
-      // ✅ CORRECTION: lire msg['type'] directement (pas msg['payload']['type'])
+    // ✅ Écouteur typé correctement
+    _signalListener = (dynamic msg) async {
       final sigType = msg['type'];
       final sigData = msg['data'];
       try {
@@ -148,7 +147,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
     widget.socket.on('signal', _signalListener!);
   }
 
-  // ✅ Nettoyage complet de la session
   void _cleanupSession() {
     if (_signalListener != null) {
       widget.socket.off('signal', _signalListener);
@@ -188,4 +186,4 @@ class _DashboardScreenState extends State<DashboardScreen> {
       ]),
     );
   }
-}
+} 
