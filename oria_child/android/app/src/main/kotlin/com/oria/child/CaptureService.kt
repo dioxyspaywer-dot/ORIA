@@ -8,7 +8,6 @@ import android.content.pm.ServiceInfo
 import android.os.Build
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
-import androidx.core.app.ServiceCompat
 
 class CaptureService : Service() {
 
@@ -37,16 +36,14 @@ class CaptureService : Service() {
             .setOngoing(true)
             .build()
 
-        // ✅ Utilisation exclusive de ServiceCompat pour éviter Unresolved reference
-        var foregroundType = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            foregroundType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+            val foregroundType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
                     ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+            startForeground(1, notification, foregroundType)
+        } else {
+            startForeground(1, notification)
         }
-
-        ServiceCompat.startForeground(this, 1, notification, foregroundType)
-
         return START_STICKY
     }
 
