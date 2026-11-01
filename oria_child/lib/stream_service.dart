@@ -9,10 +9,36 @@ class StreamService {
   MediaStream? _localStream;
   final IO.Socket socket;
   final String targetId;
+  bool _starting = false;
+  int _retryCount = 0;
 
   StreamService(this.socket, this.targetId);
 
-  Future<void> startCamera() async {
+  Future<void> startCamera() async => _startSafe(() => _doStartCamera());
+  Future<void> startMic() async => _startSafe(() => _doStartMic());
+  Future<void> startScreen() async => _startSafe(() => _doStartScreen());
+
+  Future<void> _startSafe(Future<void> Function() action) async {
+    if (_starting) return;
+    _starting = true;
+    try {
+      await stop();
+      await action();
+      _retryCount = 0;
+    } catch (e) {
+      print('STREAM ERROR: $e');
+      await stop();
+      _retryCount++;
+      if (_retryCount <= 3) {
+        await Future.delayed(Duration(seconds: 5 * _retryCount));
+        await _startSafe(action);
+      }
+    } finally {
+      _starting = false;
+    }
+  }
+
+  Future<void> _doStartCamera() async {
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': {'facingMode': 'user', 'width': 640, 'height': 480, 'frameRate': 30}
@@ -21,7 +47,7 @@ class StreamService {
     await _sendOffer();
   }
 
-  Future<void> startMic() async {
+  Future<void> _doStartMic() async {
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
       'video': false
@@ -30,7 +56,7 @@ class StreamService {
     await _sendOffer();
   }
 
-  Future<void> startScreen() async {
+  Future<void> _doStartScreen() async {
     try {
       await _captureChannel.invokeMethod('start_screen');
       await Future.delayed(const Duration(milliseconds: 500));
@@ -46,7 +72,7 @@ class StreamService {
         await _createPeerConnection();
         await _sendOffer();
       } catch (e2) {
-        print('SCREEN ERROR: $e2');
+        print('SCREEN FALLBACK ERROR: $e2');
       }
     }
   }
@@ -71,6 +97,14 @@ class StreamService {
           'data': candidate.toMap()
         });
       }
+    };
+
+    _peerConnection!.onConnectionState = (state) {
+      print('PC_STATE: $state');
+    };
+
+    _peerConnection!.onIceConnectionState = (state) {
+      print('ICE_STATE: $state');
     };
   }
 
@@ -107,8 +141,10 @@ class StreamService {
   Future<void> stop() async {
     _localStream?.getTracks().forEach((t) => t.stop());
     await _localStream?.dispose();
-    await _peerConnection?.close();
     _localStream = null;
+
+    await _peerConnection?.close();
+    await _peerConnection?.dispose();
     _peerConnection = null;
   }
 }
