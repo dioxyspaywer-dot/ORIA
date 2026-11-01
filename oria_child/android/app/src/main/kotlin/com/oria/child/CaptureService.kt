@@ -37,18 +37,16 @@ class CaptureService : Service() {
             .setOngoing(true)
             .build()
 
+        // ✅ Utilisation exclusive de ServiceCompat pour éviter Unresolved reference
+        var foregroundType = 0
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            ServiceCompat.startForeground(
-                this,
-                1,
-                notification,
-                ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
-                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
-            )
-        } else {
-            startForeground(1, notification)
+            foregroundType = ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PROJECTION or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA or
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
         }
+
+        ServiceCompat.startForeground(this, 1, notification, foregroundType)
+
         return START_STICKY
     }
 
