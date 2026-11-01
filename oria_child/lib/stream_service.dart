@@ -1,5 +1,8 @@
+import 'package:flutter/services.dart';
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
+
+const _captureChannel = MethodChannel('oria.capture/service');
 
 class StreamService {
   RTCPeerConnection? _peerConnection;
@@ -29,6 +32,8 @@ class StreamService {
 
   Future<void> startScreen() async {
     try {
+      await _captureChannel.invokeMethod('start_screen');
+      await Future.delayed(const Duration(milliseconds: 500));
       _localStream = await navigator.mediaDevices.getDisplayMedia({
         'video': {'width': 1280, 'height': 720, 'frameRate': 30},
         'audio': true

