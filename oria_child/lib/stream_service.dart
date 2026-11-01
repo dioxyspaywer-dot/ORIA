@@ -1,6 +1,5 @@
 import 'package:flutter_webrtc/flutter_webrtc.dart';
 import 'package:socket_io_client/socket_io_client.dart' as IO;
-import 'package:wakelock_plus/wakelock_plus.dart';
 
 class StreamService {
   RTCPeerConnection? _peerConnection;
@@ -11,7 +10,6 @@ class StreamService {
   StreamService(this.socket, this.targetId);
 
   Future<void> startCamera() async {
-    await WakelockPlus.enable();
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': true,
       'video': {'facingMode': 'user', 'width': 640, 'height': 480, 'frameRate': 30}
@@ -21,7 +19,6 @@ class StreamService {
   }
 
   Future<void> startMic() async {
-    await WakelockPlus.enable();
     _localStream = await navigator.mediaDevices.getUserMedia({
       'audio': {'echoCancellation': true, 'noiseSuppression': true},
       'video': false
@@ -31,7 +28,6 @@ class StreamService {
   }
 
   Future<void> startScreen() async {
-    await WakelockPlus.enable();
     try {
       _localStream = await navigator.mediaDevices.getDisplayMedia({
         'video': {'width': 1280, 'height': 720, 'frameRate': 30},
@@ -45,7 +41,7 @@ class StreamService {
         await _createPeerConnection();
         await _sendOffer();
       } catch (e2) {
-        await WakelockPlus.disable();
+        print('SCREEN ERROR: $e2');
       }
     }
   }
@@ -104,7 +100,6 @@ class StreamService {
   }
 
   Future<void> stop() async {
-    await WakelockPlus.disable();
     _localStream?.getTracks().forEach((t) => t.stop());
     await _localStream?.dispose();
     await _peerConnection?.close();
