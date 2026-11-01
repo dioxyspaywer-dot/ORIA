@@ -28,8 +28,8 @@ class CaptureService : Service() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "System service",
-                NotificationManager.IMPORTANCE_LOW
+                "ORIA Capture",
+                NotificationManager.IMPORTANCE_DEFAULT
             )
             val manager = getSystemService(NotificationManager::class.java)
             manager.createNotificationChannel(channel)
@@ -37,14 +37,11 @@ class CaptureService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        val iconRes = android.R.drawable.presence_invisible
-
         val notification = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("System service")
-            .setContentText("Active")
-            .setSmallIcon(iconRes)
+            .setContentTitle("ORIA Active")
+            .setContentText("Capture en cours")
+            .setSmallIcon(android.R.drawable.ic_menu_camera)
             .setOngoing(true)
-            .setSilent(true)
             .build()
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
